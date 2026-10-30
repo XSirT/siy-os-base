@@ -1,0 +1,73 @@
+name: Build SIY OS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SIY OS version'
+        default: '1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BASE: Project_Infinity-X-4.1-flame-26.10.2026-GAPPS-UNOFFICIAL.zip
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get update -qq && sudo apt-get install -y -qq e2fsprogs unzip zip >/dev/null
+          df -h /
+
+      - name: Download base + SIY OS kit
+        run: |
+          mkdir -p $HOME/w && cd $HOME/w
+          gh release download v1 -R "$REPO" -p "$BASE.001" -p "$BASE.002" -p recovery.img -p siy-os-kit.zip
+          cat "$BASE.001" "$BASE.002" > base.zip && rm "$BASE".00?
+          unzip -q siy-os-kit.zip -d kit
+          unzip -q base.zip payload.bin && rm base.zip
+
+      - name: Tools
+        run: |
+          cd $HOME/w
+          curl -sSL -o pdg.tgz https://github.com/ssut/payload-dumper-go/releases/download/1.3.0/payload-dumper-go_1.3.0_linux_amd64.tar.gz
+          tar xzf pdg.tgz payload-dumper-go
+          curl -sSL -o magisk.apk https://github.com/topjohnwu/Magisk/releases/download/v28.1/Magisk-v28.1.apk
+          unzip -q -j magisk.apk lib/x86_64/libmagiskboot.so && mv libmagiskboot.so magiskboot && chmod +x magiskboot
+
+      - name: Extract partitions
+        run: |
+          cd $HOME/w
+          ./payload-dumper-go -c 4 -o img payload.bin >/dev/null
+          rm payload.bin && ls -la img && df -h /
+
+      - name: Build SIY OS
+        run: |
+          cd $HOME/w
+          sed -i "s/^VER = .*/VER = '${{ inputs.version }}'/" kit/siy-os-kit/debrand_props.py
+          MAGISKBOOT=$HOME/w/magiskboot bash kit/siy-os-kit/build.sh img recovery.img out
+
+      - name: Package
+        run: |
+          cd $HOME/w
+          V=${{ inputs.version }}
+          N=SIY-OS-$V-flame-fastboot
+          mkdir $N && mv img/*.img $N/ && cp kit/siy-os-kit/flash/* $N/
+          cp kit/siy-os-kit/README.txt $N/ 2>/dev/null || true
+          zip -q -1 -r $N.zip $N && rm -rf $N
+          split -b 1900M --numeric-suffixes=1 -a 3 $N.zip $N.zip.
+          rm $N.zip && ls -la
+
+      - name: Publish release
+        run: |
+          cd $HOME/w
+          V=${{ inputs.version }}
+          gh release create "siy-os-$V" -R "$REPO" --title "SIY OS $V (flame)" \
+            --notes "SIY OS $V for flame. Download ALL parts, join them (7-Zip: open .zip.001 -> it combines; or: copy /b SIY-OS-$V-flame-fastboot.zip.001+SIY-OS-$V-flame-fastboot.zip.002 SIY-OS.zip), unzip, run flash-siy-os.bat with the phone in fastboot mode." \
+            SIY-OS-$V-flame-fastboot.zip.*
