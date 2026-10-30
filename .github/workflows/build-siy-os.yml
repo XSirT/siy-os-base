@@ -53,14 +53,20 @@ jobs:
           sed -i "s/^VER = .*/VER = '${{ inputs.version }}'/" kit/siy-os-kit/debrand_props.py
           MAGISKBOOT=$HOME/w/magiskboot bash kit/siy-os-kit/build.sh img recovery.img out
 
-      - name: Package
+      - name: Package (flashable zip + fastboot in one)
         run: |
           cd $HOME/w
           V=${{ inputs.version }}
-          N=SIY-OS-$V-flame-fastboot
-          mkdir $N && mv img/*.img $N/ && cp kit/siy-os-kit/flash/* $N/
-          cp kit/siy-os-kit/README.txt $N/ 2>/dev/null || true
-          zip -q -1 -r $N.zip $N && rm -rf $N
+          N=SIY-OS-$V-flame
+          mkdir -p pkg/META-INF/com/google/android
+          mv img/*.img pkg/
+          (cd pkg && for f in *.img; do echo "${f%.img} $(stat -c %s $f)"; done > sizes.txt)
+          cp kit/siy-os-kit/flash/update-binary pkg/META-INF/com/google/android/update-binary
+          echo '#SIY OS' > pkg/META-INF/com/google/android/updater-script
+          cp kit/siy-os-kit/flash/flash-siy-os.bat kit/siy-os-kit/flash/flash-siy-os.sh kit/siy-os-kit/README.txt pkg/
+          (cd pkg && zip -q -6 -r ../$N.zip META-INF sizes.txt *.img flash-siy-os.bat flash-siy-os.sh README.txt)
+          rm -rf pkg
+          sha256sum $N.zip > $N.zip.sha256
           split -b 1900M --numeric-suffixes=1 -a 3 $N.zip $N.zip.
           rm $N.zip && ls -la
 
@@ -69,5 +75,5 @@ jobs:
           cd $HOME/w
           V=${{ inputs.version }}
           gh release create "siy-os-$V" -R "$REPO" --title "SIY OS $V (flame)" \
-            --notes "SIY OS $V for flame. Download ALL parts, join them (7-Zip: open .zip.001 -> it combines; or: copy /b SIY-OS-$V-flame-fastboot.zip.001+SIY-OS-$V-flame-fastboot.zip.002 SIY-OS.zip), unzip, run flash-siy-os.bat with the phone in fastboot mode." \
-            SIY-OS-$V-flame-fastboot.zip.*
+            --notes "SIY OS $V for flame. Download ALL parts, then on PC: copy /b SIY-OS-$V-flame.zip.001+SIY-OS-$V-flame.zip.002 SIY-OS-$V-flame.zip . Recovery: adb sideload SIY-OS-$V-flame.zip . Fastboot: unzip and run flash-siy-os.bat." \
+            SIY-OS-$V-flame.zip.*
